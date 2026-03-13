@@ -10,20 +10,22 @@ PASSWORD = os.getenv("EMAIL_PASSWORD")
 
 headers = {"User-Agent": "Mozilla/5.0"}
 
+keywords = ["java", "spring", "spring boot", "microservices", "rest"]
+
 jobs = []
 
 # -------- NAUKRI --------
-naukri_url = "https://www.naukri.com/java-developer-jobs-in-pune?experience=1-3"
+naukri_url = "https://www.naukri.com/java-developer-jobs-in-pune?experience=1-3&jobAge=7"
 
 res = requests.get(naukri_url, headers=headers)
 soup = BeautifulSoup(res.text, "lxml")
 
 for job in soup.select("a.title"):
 
-    title = job.text.strip()
+    title = job.text.strip().lower()
     link = job.get("href")
 
-    if "java" in title.lower() or "spring" in title.lower():
+    if any(k in title for k in keywords):
 
         jobs.append({
             "source": "Naukri",
@@ -33,7 +35,7 @@ for job in soup.select("a.title"):
 
 
 # -------- INDEED --------
-indeed_url = "https://in.indeed.com/jobs?q=java+developer&l=Pune"
+indeed_url = "https://in.indeed.com/jobs?q=java+spring+boot&l=Pune&fromage=7"
 
 res = requests.get(indeed_url, headers=headers)
 soup = BeautifulSoup(res.text, "lxml")
@@ -43,10 +45,11 @@ for job in soup.select("a.tapItem"):
     title_tag = job.select_one("h2 span")
 
     if title_tag:
-        title = title_tag.text.strip()
+
+        title = title_tag.text.strip().lower()
         link = "https://in.indeed.com" + job.get("href")
 
-        if "java" in title.lower() or "spring" in title.lower():
+        if any(k in title for k in keywords):
 
             jobs.append({
                 "source": "Indeed",
@@ -56,17 +59,17 @@ for job in soup.select("a.tapItem"):
 
 
 # -------- LINKEDIN --------
-linkedin_url = "https://www.linkedin.com/jobs/search/?keywords=java%20developer&location=Pune"
+linkedin_url = "https://www.linkedin.com/jobs/search/?keywords=java%20spring%20boot&location=Pune&f_TPR=r604800"
 
 res = requests.get(linkedin_url, headers=headers)
 soup = BeautifulSoup(res.text, "lxml")
 
 for job in soup.select(".base-card__full-link"):
 
-    title = job.text.strip()
+    title = job.text.strip().lower()
     link = job.get("href")
 
-    if "java" in title.lower() or "spring" in title.lower():
+    if any(k in title for k in keywords):
 
         jobs.append({
             "source": "LinkedIn",
@@ -76,38 +79,36 @@ for job in soup.select(".base-card__full-link"):
 
 
 # -------- CLEAN DATA --------
+
 df = pd.DataFrame(jobs)
 
 df = df.drop_duplicates(subset=["title"])
 
 df = df.head(50)
 
-# -------- EMAIL BODY --------
 body = ""
 
-for i, row in df.iterrows():
+for _, row in df.iterrows():
 
     body += f"""
 Source: {row['source']}
-Job: {row['title']}
-Apply: {row['link']}
+Role: {row['title']}
+Apply Link: {row['link']}
 
------------------------------------
+--------------------------------
 """
+
 
 msg = MIMEText(body)
 
-msg["Subject"] = "Daily Java Jobs (Pune 1-3 yrs)"
+msg["Subject"] = "Java / Spring Boot Jobs (Last 7 Days - Pune)"
 msg["From"] = EMAIL
 msg["To"] = EMAIL
 
 
 server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
-
 server.login(EMAIL, PASSWORD)
-
 server.sendmail(EMAIL, EMAIL, msg.as_string())
-
 server.quit()
 
-print("Email sent with job links")
+print("Email sent successfully")
