@@ -1,0 +1,25 @@
+name: Daily Job Hunter
+
+on:
+  schedule:
+    - cron: "30 2 * * *"   # 8 AM IST
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install -r requirements.txt
+
+      - name: Run Job Scraper
+        env:
+          EMAIL: ${{ secrets.EMAIL }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: python job_scraper.py
