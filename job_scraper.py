@@ -1,6 +1,5 @@
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd
 import smtplib
 from email.mime.text import MIMEText
 import os
@@ -8,107 +7,104 @@ import os
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("EMAIL_PASSWORD")
 
-headers = {"User-Agent": "Mozilla/5.0"}
+headers = {
+    "User-Agent": "Mozilla/5.0"
+}
 
-keywords = ["java", "spring", "spring boot", "microservices", "rest"]
+url = "https://www.naukri.com/java-developer-jobs-in-pune?experience=1-3&jobAge=7"
+
+response = requests.get(url, headers=headers)
+
+soup = BeautifulSoup(response.text, "lxml")
 
 jobs = []
 
-# -------- NAUKRI --------
-naukri_url = "https://www.naukri.com/java-developer-jobs-in-pune?experience=1-3&jobAge=7"
+# keywords you want
+skills_keywords = [
+    "java",
+    "spring",
+    "spring boot",
+    "microservices",
+    "rest"
+]
 
-res = requests.get(naukri_url, headers=headers)
-soup = BeautifulSoup(res.text, "lxml")
+title_keywords = [
+    "java developer",
+    "software engineer",
+    "backend developer",
+    "spring boot developer"
+]
 
-for job in soup.select("a.title"):
+cards = soup.select("article.jobTuple")
 
-    title = job.text.strip().lower()
-    link = job.get("href")
+for job in cards:
 
-    if any(k in title for k in keywords):
+    title_tag = job.select_one("a.title")
 
-        jobs.append({
-            "source": "Naukri",
-            "title": title,
-            "link": link
-        })
+    if not title_tag:
+        continue
 
+    title = title_tag.text.strip()
+    link = title_tag.get("href")
 
-# -------- INDEED --------
-indeed_url = "https://in.indeed.com/jobs?q=java+spring+boot&l=Pune&fromage=7"
+    exp_tag = job.select_one(".expwdth")
 
-res = requests.get(indeed_url, headers=headers)
-soup = BeautifulSoup(res.text, "lxml")
+    experience = exp_tag.text.strip() if exp_tag else ""
 
-for job in soup.select("a.tapItem"):
+    desc_tag = job.select_one(".job-description")
 
-    title_tag = job.select_one("h2 span")
+    description = desc_tag.text.lower() if desc_tag else ""
 
-    if title_tag:
+    # experience filter
+    if not ("1" in experience or "2" in experience or "3" in experience):
+        continue
 
-        title = title_tag.text.strip().lower()
-        link = "https://in.indeed.com" + job.get("href")
+    # title filter
+    if not any(k in title.lower() for k in title_keywords):
+        continue
 
-        if any(k in title for k in keywords):
+    # skill filter
+    if not any(k in description for k in skills_keywords):
+        continue
 
-            jobs.append({
-                "source": "Indeed",
-                "title": title,
-                "link": link
-            })
-
-
-# -------- LINKEDIN --------
-linkedin_url = "https://www.linkedin.com/jobs/search/?keywords=java%20spring%20boot&location=Pune&f_TPR=r604800"
-
-res = requests.get(linkedin_url, headers=headers)
-soup = BeautifulSoup(res.text, "lxml")
-
-for job in soup.select(".base-card__full-link"):
-
-    title = job.text.strip().lower()
-    link = job.get("href")
-
-    if any(k in title for k in keywords):
-
-        jobs.append({
-            "source": "LinkedIn",
-            "title": title,
-            "link": link
-        })
+    jobs.append({
+        "title": title,
+        "experience": experience,
+        "link": link
+    })
 
 
-# -------- CLEAN DATA --------
-
-df = pd.DataFrame(jobs)
-
-df = df.drop_duplicates(subset=["title"])
-
-df = df.head(50)
+# limit to 25 jobs
+jobs = jobs[:25]
 
 body = ""
 
-for _, row in df.iterrows():
+for job in jobs:
 
     body += f"""
-Source: {row['source']}
-Role: {row['title']}
-Apply Link: {row['link']}
+Job Title: {job['title']}
+Experience: {job['experience']}
+Apply Link:
+{job['link']}
 
---------------------------------
+------------------------------------
 """
 
+if not body:
+    body = "No matching Java/Spring Boot jobs posted in last 7 days."
 
 msg = MIMEText(body)
 
-msg["Subject"] = "Java / Spring Boot Jobs (Last 7 Days - Pune)"
+msg["Subject"] = "Java / Spring Boot Jobs (Pune | 1-3 yrs | Last 7 Days)"
 msg["From"] = EMAIL
 msg["To"] = EMAIL
 
-
 server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
+
 server.login(EMAIL, PASSWORD)
+
 server.sendmail(EMAIL, EMAIL, msg.as_string())
+
 server.quit()
 
-print("Email sent successfully")
+print("Filtered Naukri jobs email sent")
