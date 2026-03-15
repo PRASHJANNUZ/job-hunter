@@ -1,119 +1,121 @@
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
+import re
 import smtplib
 from email.mime.text import MIMEText
 import os
-import re
+import dateparser
+from datetime import datetime, timedelta
 
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("EMAIL_PASSWORD")
 
-headers = {"User-Agent": "Mozilla/5.0"}
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-keywords = ["java", "spring", "spring boot", "microservices", "rest"]
+KEYWORDS = ["java", "spring", "spring boot", "microservices", "rest"]
+JOB_TITLES = ["java developer", "backend", "software engineer", "spring boot"]
+
+MAX_HOURS = 72
 
 jobs = []
 
+def valid_title(title):
+    title = title.lower()
+    return any(k in title for k in JOB_TITLES)
 
-def valid_experience(exp_text):
-    numbers = re.findall(r'\d+', exp_text)
+def valid_skills(text):
+    text = text.lower()
+    return any(k in text for k in KEYWORDS)
 
-    if len(numbers) >= 2:
-        min_exp = int(numbers[0])
-        max_exp = int(numbers[1])
-
-        return min_exp >= 1 and max_exp <= 3
-
+def extract_experience(text):
+    exp_pattern = r'(\d+)\s*[-to]+\s*(\d+)\s*years'
+    match = re.search(exp_pattern, text.lower())
+    if match:
+        start = int(match.group(1))
+        end = int(match.group(2))
+        if start <= 4 and end <= 4:
+            return True
     return False
 
+def within_72_hours(date_text):
+    if not date_text:
+        return False
+    parsed = dateparser.parse(date_text)
+    if not parsed:
+        return False
+    return parsed > datetime.now() - timedelta(hours=MAX_HOURS)
 
-# -------- NAUKRI --------
+# -------- LINKEDIN --------
+linkedin_url = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=java&location=Pune"
 
-naukri_url = "https://www.naukri.com/java-developer-jobs-in-pune?jobAge=7"
-
-res = requests.get(naukri_url, headers=headers)
-
+res = requests.get(linkedin_url, headers=HEADERS)
 soup = BeautifulSoup(res.text, "lxml")
 
-cards = soup.select(".jobTuple")
+for job in soup.select(".base-card"):
 
-for job in cards:
+    title_tag = job.select_one(".base-search-card__title")
+    link_tag = job.select_one("a.base-card__full-link")
+    time_tag = job.select_one("time")
 
-    title_tag = job.select_one("a.title")
-    exp_tag = job.select_one(".exp")
+    if not title_tag or not link_tag:
+        continue
 
-    if title_tag and exp_tag:
+    title = title_tag.text.strip()
+    link = link_tag["href"]
 
-        title = title_tag.text.strip().lower()
-        exp = exp_tag.text.strip()
-        link = title_tag.get("href")
+    date_posted = time_tag.text.strip() if time_tag else ""
 
-        if any(k in title for k in keywords) and valid_experience(exp):
+    if not valid_title(title):
+        continue
 
-            jobs.append({
-                "source": "Naukri",
-                "title": title,
-                "experience": exp,
-                "link": link
-            })
+    if not within_72_hours(date_posted):
+        continue
+
+    jobs.append({
+        "source": "LinkedIn",
+        "title": title,
+        "link": link,
+        "date": date_posted
+    })
 
 
 # -------- INDEED --------
+indeed_url = "https://in.indeed.com/jobs?q=java+developer&l=Pune"
 
-indeed_url = "https://in.indeed.com/jobs?q=java+spring+boot&l=Pune&fromage=7"
-
-res = requests.get(indeed_url, headers=headers)
-
+res = requests.get(indeed_url, headers=HEADERS)
 soup = BeautifulSoup(res.text, "lxml")
 
-for job in soup.select("a.tapItem"):
+for job in soup.select(".job_seen_beacon"):
 
     title_tag = job.select_one("h2 span")
-    exp_tag = job.select_one(".metadata")
+    link_tag = job.select_one("a")
 
-    if title_tag:
+    date_tag = job.select_one(".date")
 
-        title = title_tag.text.strip().lower()
-        link = "https://in.indeed.com" + job.get("href")
+    if not title_tag or not link_tag:
+        continue
 
-        exp_text = exp_tag.text.lower() if exp_tag else ""
+    title = title_tag.text.strip()
+    link = "https://in.indeed.com" + link_tag["href"]
 
-        if any(k in title for k in keywords) and ("1 year" in exp_text or "2 year" in exp_text or "3 year" in exp_text):
+    date_posted = date_tag.text.strip() if date_tag else ""
 
-            jobs.append({
-                "source": "Indeed",
-                "title": title,
-                "experience": exp_text,
-                "link": link
-            })
+    if not valid_title(title):
+        continue
 
+    if not within_72_hours(date_posted):
+        continue
 
-# -------- LINKEDIN --------
-
-linkedin_url = "https://www.linkedin.com/jobs/search/?keywords=java%20spring%20boot&location=Pune&f_TPR=r604800"
-
-res = requests.get(linkedin_url, headers=headers)
-
-soup = BeautifulSoup(res.text, "lxml")
-
-for job in soup.select(".base-card__full-link"):
-
-    title = job.text.strip().lower()
-    link = job.get("href")
-
-    if any(k in title for k in keywords):
-
-        jobs.append({
-            "source": "LinkedIn",
-            "title": title,
-            "experience": "Not listed",
-            "link": link
-        })
+    jobs.append({
+        "source": "Indeed",
+        "title": title,
+        "link": link,
+        "date": date_posted
+    })
 
 
-# -------- CLEAN DATA --------
-
+# -------- DATAFRAME FILTER --------
 df = pd.DataFrame(jobs)
 
 df = df.drop_duplicates(subset=["title"])
@@ -126,21 +128,23 @@ for _, row in df.iterrows():
 
     body += f"""
 Source: {row['source']}
-Role: {row['title']}
-Experience: {row['experience']}
-Apply Link: {row['link']}
+Title: {row['title']}
+Posted: {row['date']}
 
---------------------------------
+Apply Link:
+{row['link']}
+
+---------------------------------
 """
 
+if body == "":
+    body = "No jobs matching criteria in last 72 hours."
 
 msg = MIMEText(body)
 
-msg["Subject"] = "Java Jobs (1-3 Years Experience - Pune)"
-
+msg["Subject"] = "Java Backend Jobs (Pune | 1-4 yrs | Last 72 hrs)"
 msg["From"] = EMAIL
 msg["To"] = EMAIL
-
 
 server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
 
